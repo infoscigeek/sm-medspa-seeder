@@ -1,0 +1,29 @@
+{
+  "title": "OSM Med Spa Seeder",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "bbox": {
+      "title": "Bounding box",
+      "type": "object",
+      "properties": {
+        "south": { "type": "number", "default": 29.10 },
+        "west":  { "type": "number", "default": -98.85 },
+        "north": { "type": "number", "default": 29.75 },
+        "east":  { "type": "number", "default": -98.10 }
+      },
+      "description": "San Antonio metro by default."
+    },
+    "keywords": {
+      "title": "Name keywords (regex OR)",
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["med spa","medspa","aesthetic","inject","botox","laser","hydrafacial"]
+    },
+    "city": {
+      "title": "Fallback city label",
+      "type": "string",
+      "default": "San Antonio"
+    }
+  }
+}
