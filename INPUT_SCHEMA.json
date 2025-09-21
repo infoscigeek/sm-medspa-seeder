@@ -3,27 +3,15 @@
   "type": "object",
   "schemaVersion": 1,
   "properties": {
-    "bbox": {
-      "title": "Bounding box",
-      "type": "object",
-      "properties": {
-        "south": { "type": "number", "default": 29.10 },
-        "west":  { "type": "number", "default": -98.85 },
-        "north": { "type": "number", "default": 29.75 },
-        "east":  { "type": "number", "default": -98.10 }
-      },
-      "description": "San Antonio metro by default."
-    },
-    "keywords": {
-      "title": "Name keywords (regex OR)",
-      "type": "array",
-      "items": { "type": "string" },
-      "default": ["med spa","medspa","aesthetic","inject","botox","laser","hydrafacial"]
-    },
-    "city": {
-      "title": "Fallback city label",
+    "bbox_south": { "title": "South latitude", "type": "number", "default": 29.10 },
+    "bbox_west":  { "title": "West longitude", "type": "number", "default": -98.85 },
+    "bbox_north": { "title": "North latitude", "type": "number", "default": 29.75 },
+    "bbox_east":  { "title": "East longitude", "type": "number", "default": -98.10 },
+    "keyword_list": {
+      "title": "Keywords (comma-separated)",
       "type": "string",
-      "default": "San Antonio"
-    }
+      "default": "med spa, medspa, aesthetic, inject, botox, laser, hydrafacial"
+    },
+    "city": { "title": "Fallback city label", "type": "string", "default": "San Antonio" }
   }
 }
