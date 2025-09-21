@@ -1,6 +1,9 @@
 // main.js — OSM Med Spa Seeder (Apify Actor)
-// Finds med spas in a bounding box via OpenStreetMap Overpass,
-// extracts websites → root domains, and writes a clean dataset.
+// Queries OpenStreetMap Overpass for "med spa"-like places in a bounding box,
+// extracts website → root domain, and writes a clean dataset.
+// Works with either:
+//  A) Flat input fields: bbox_south/west/north/east, keyword_list (comma-separated), city
+//  B) Nested fields: { bbox: { south, west, north, east }, keywords: [...], city }
 
 import { Actor } from 'apify';
 import fetch from 'node-fetch';
@@ -13,8 +16,10 @@ const OVERPASS_ENDPOINTS = [
 
 function buildRegex(keywords) {
   // (?i) = case-insensitive; join keywords with |
-  const safe = keywords.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return `(?i)(${safe.join('|')})`;
+  const safe = (keywords || []).map((k) => String(k).trim()).filter(Boolean)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const joined = safe.length ? safe.join('|') : 'med\\s*spa|medspa|aesthetic|inject|botox|laser|hydrafacial';
+  return `(?i)(${joined})`;
 }
 
 function rootDomain(url) {
@@ -47,7 +52,8 @@ function cityFromTags(tags, fallbackCity) {
 
 function evidenceNote(tags, keywords) {
   const n = (tags.name || '').toLowerCase();
-  const hits = keywords.filter((k) => n.includes(k.toLowerCase()));
+  const hits = (keywords || []).map(String).filter(Boolean)
+    .map((k) => k.toLowerCase()).filter((k) => n.includes(k));
   return hits.length ? `name_keywords=${hits.join(',')}` : '';
 }
 
@@ -55,7 +61,8 @@ function dedupeRows(rows) {
   const seen = new Set();
   const out = [];
   for (const r of rows) {
-    const key = r.domain || `${r.name.toLowerCase()}|${r.city.toLowerCase()}`;
+    // Prefer domain for dedupe; fallback to name+city
+    const key = r.domain || `${(r.name || '').toLowerCase()}|${(r.city || '').toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);
@@ -84,12 +91,23 @@ async function queryOverpass(ql) {
 Actor.main(async () => {
   const input = (await Actor.getInput()) || {};
 
-  // Defaults target San Antonio med spas; customize via INPUT
-  const {
-    bbox = { south: 29.10, west: -98.85, north: 29.75, east: -98.10 },
-    keywords = ['med spa', 'medspa', 'aesthetic', 'inject', 'botox', 'laser', 'hydrafacial'],
-    city = 'San Antonio',
-  } = input;
+  // ----- Accept BOTH input styles -----
+  const bbox = input.bbox || {
+    south: Number(input.bbox_south ?? 29.10),
+    west:  Number(input.bbox_west  ?? -98.85),
+    north: Number(input.bbox_north ?? 29.75),
+    east:  Number(input.bbox_east  ?? -98.10),
+  };
+
+  const defaultKws = ['med spa', 'medspa', 'aesthetic', 'inject', 'botox', 'laser', 'hydrafacial'];
+  const keywords = Array.isArray(input.keywords) && input.keywords.length
+    ? input.keywords
+    : (typeof input.keyword_list === 'string'
+        ? input.keyword_list.split(',').map((s) => s.trim()).filter(Boolean)
+        : defaultKws);
+
+  const city = input.city || 'San Antonio';
+  // ------------------------------------
 
   const nameRegex = buildRegex(keywords);
 
@@ -108,45 +126,43 @@ Actor.main(async () => {
   `;
 
   const json = await queryOverpass(ql);
-  const elements = json?.elements || [];
+  const elements = Array.isArray(json?.elements) ? json.elements : [];
 
-  const rows = elements
-    .map((el) => {
-      const tags = el.tags || {};
-      const name = (tags.name || '').trim();
-      if (!name) return null;
+  const rows = elements.map((el) => {
+    const tags = el.tags || {};
+    const name = (tags.name || '').trim();
+    if (!name) return null;
 
-      const website = tags.website || tags['contact:website'] || '';
-      const domain = rootDomain(website);
-      const lat = el.lat ?? el.center?.lat ?? null;
-      const lon = el.lon ?? el.center?.lon ?? null;
-      const category = categoryFromTags(tags);
-      const cityPicked = cityFromTags(tags, city);
-      const note = evidenceNote(tags, keywords);
-      const confidence = domain ? 1.0 : note ? 0.7 : 0.5;
-      const osmType = el.type === 'node' ? 'node' : 'way';
-      const sourceUrl = `https://www.openstreetmap.org/${osmType}/${el.id}`;
+    const website = tags.website || tags['contact:website'] || '';
+    const domain = rootDomain(website);
+    const lat = el.lat ?? el.center?.lat ?? null;
+    const lon = el.lon ?? el.center?.lon ?? null;
+    const category = categoryFromTags(tags);
+    const cityPicked = cityFromTags(tags, city);
+    const note = evidenceNote(tags, keywords);
+    const confidence = domain ? 1.0 : (note ? 0.7 : 0.5);
+    const osmType = el.type === 'node' ? 'node' : 'way';
+    const sourceUrl = `https://www.openstreetmap.org/${osmType}/${el.id}`;
 
-      return {
-        name,
-        domain,
-        city: cityPicked,
-        category,
-        source_url: sourceUrl,
-        lat: typeof lat === 'number' ? lat.toFixed(6) : '',
-        lon: typeof lon === 'number' ? lon.toFixed(6) : '',
-        confidence: confidence.toFixed(2),
-        notes: note,
-      };
-    })
-    .filter(Boolean);
+    return {
+      name,
+      domain,
+      city: cityPicked,
+      category,
+      source_url: sourceUrl,
+      lat: typeof lat === 'number' ? lat.toFixed(6) : '',
+      lon: typeof lon === 'number' ? lon.toFixed(6) : '',
+      confidence: confidence.toFixed(2),
+      notes: note,
+    };
+  }).filter(Boolean);
 
   const deduped = dedupeRows(rows);
 
   // Write dataset rows (export as CSV/JSON in Apify console)
   await Actor.pushData(deduped);
 
-  // Save a tiny run summary
+  // Save a tiny run summary for convenience
   await Actor.setValue('RUN-SUMMARY', {
     found: rows.length,
     deduped: deduped.length,
